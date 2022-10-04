@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { Button, Modal } from 'react-bootstrap'
-import { ethers } from 'ethers'
+import { BigNumber, ethers } from 'ethers'
 import { formatUnits } from 'ethers/lib/utils'
 
 export default function HomePage() {
@@ -9,50 +9,72 @@ export default function HomePage() {
   const [status, setStatus] = useState('')
   const [show, setShow] = useState(false)
   const handleClose = () => setShow(false)
-  const handleShow = () => setShow(true)
+  const handleShow = () => {
+    setStatus((status) => '')
+    setShow(true)
+  }
 
   const abi = [
     'function mint(uint256 _amount) external payable',
     'function bundlePrice(uint256 amount) public view returns (uint256)',
   ]
-  const provider = new ethers.providers.Web3Provider(window.ethereum)
+  const provider = new ethers.providers.Web3Provider(window.ethereum, 'any')
   const contractAddress = '0xC1F4Fa72e472646b5b05BA615862E7D4B2f7024b'
 
   useEffect(() => {
     getBundlePrice(counter)
   }, [counter])
 
-  const getBundlePrice = async (counter) => {
-    const contract = new ethers.Contract(contractAddress, abi, provider)
-    const bundlePrice = await contract.bundlePrice(counter)
-    setPrice(formatUnits(bundlePrice))
-    console.log('bp', bundlePrice)
-    console.log('bp to bigInt', bundlePrice.toBigInt())
-    console.log('bp to eth', formatUnits(bundlePrice))
-    console.log('bp to eth', ethers.utils.formatEther(bundlePrice))
+  const getBundlePrice = async () => {
+    try {
+      const chainId = await window.ethereum.request({
+        method: 'eth_chainId',
+      })
+      if (chainId !== '0x4') {
+        // alert('change the network to rinkeby test network')
+        await window.ethereum.request({
+          method: 'wallet_switchEthereumChain',
+          params: [{ chainId: '0x4' }],
+        })
+      }
+
+      const contract = new ethers.Contract(contractAddress, abi, provider)
+      const bundlePrice = await contract.bundlePrice(counter)
+      setPrice(bundlePrice)
+      // console.log('bp', bundlePrice)
+      // console.log('bp to bigInt', bundlePrice.toBigInt())
+      // console.log('bp to eth', formatUnits(bundlePrice))
+    } catch (error) {
+      console.error(error)
+    }
   }
 
   const handleSubmit = async () => {
-    setStatus((status) => 'Waiting for confirmation')
-    if (window.ethereum) {
-      try {
-        const result = await window.ethereum.request({
-          method: 'eth_requestAccounts',
-        })
-        const signer = provider.getSigner(result[0])
-        const contract = new ethers.Contract(contractAddress, abi, signer)
-        const tx = await contract.mint(counter)
-        setStatus((status) => 'Sent!')
-        await tx.wait()
-        setStatus((status) => 'Mined!')
-        setTimeout(handleClose, 1000)
-      } catch (error) {
-        console.log(error)
-        setStatus((status) => 'Rejected!')
-        setTimeout(handleClose, 1000)
+    try {
+      setStatus((status) => 'Waiting for confirmation')
+      if (window.ethereum) {
+        try {
+          const result = await window.ethereum.request({
+            method: 'eth_requestAccounts',
+          })
+          const signer = provider.getSigner(result[0])
+          const contract = new ethers.Contract(contractAddress, abi, signer)
+          const tx = await contract.mint(counter, { value: price })
+          setStatus((status) => 'Sent!')
+          await tx.wait()
+          setStatus((status) => 'Mined!')
+          setTimeout(handleClose, 1000)
+        } catch (error) {
+          if (error.code === 'ACTION_REJECTED') {
+            setStatus((status) => 'Rejected!')
+            setTimeout(handleClose, 1000)
+          }
+        }
+      } else {
+        alert('install metamask')
       }
-    } else {
-      alert('install metamask')
+    } catch (error) {
+      console.error(error)
     }
   }
 
@@ -72,43 +94,55 @@ export default function HomePage() {
         <Modal.Header closeButton>
           <Modal.Title>How many NFTs will you mint?</Modal.Title>
         </Modal.Header>
-        <Modal.Body>
-          <div style={{ display: 'flex', justifyContent: 'center' }}>
-            <Button
-              variant="secondary"
-              onClick={() => {
-                setCounter((counter) => {
-                  if (counter < 2) return counter
-                  else return --counter
-                })
-                getBundlePrice(counter)
-              }}
-            >
-              -
-            </Button>
-            <h4 style={{ paddingRight: '50px', paddingLeft: '50px' }}>
-              {' '}
-              {counter}{' '}
-            </h4>
-            <Button
-              variant="secondary"
-              onClick={() => {
-                setCounter((counter) => ++counter)
-                getBundlePrice(counter)
-              }}
-            >
-              +
-            </Button>
-          </div>
-          <h4 style={{ textAlign: 'center', paddingTop: '20px' }}>
-            Price: {price} ETH
-          </h4>
-        </Modal.Body>
-        <Modal.Footer style={{ justifyContent: 'center' }}>
-          <Button variant="warning" onClick={handleSubmit}>
-            Mint
-          </Button>
-        </Modal.Footer>
+        {status === '' ? (
+          <>
+            <Modal.Body>
+              <div style={{ display: 'flex', justifyContent: 'center' }}>
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    setCounter((counter) => {
+                      if (counter < 2) return counter
+                      else return --counter
+                    })
+                    getBundlePrice(counter)
+                  }}
+                >
+                  -
+                </Button>
+                <h4 style={{ paddingRight: '50px', paddingLeft: '50px' }}>
+                  {' '}
+                  {counter}{' '}
+                </h4>
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    setCounter((counter) => ++counter)
+                    getBundlePrice(counter)
+                  }}
+                >
+                  +
+                </Button>
+              </div>
+              <h4 style={{ textAlign: 'center', paddingTop: '20px' }}>
+                Price: {formatUnits(price)} ETH
+              </h4>
+            </Modal.Body>
+            <Modal.Footer style={{ justifyContent: 'center' }}>
+              <Button variant="warning" onClick={handleSubmit}>
+                Mint
+              </Button>
+            </Modal.Footer>
+          </>
+        ) : (
+          <>
+            <Modal.Body>
+              <div style={{ display: 'flex', justifyContent: 'center' }}>
+                {status}
+              </div>
+            </Modal.Body>
+          </>
+        )}
       </Modal>
     </div>
   )
